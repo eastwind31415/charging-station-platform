@@ -16,6 +16,8 @@ qt_add_executable(ncs_user
     ui/station_card.h
     ui/station_list_widget.cpp
     ui/station_list_widget.h
+    ui/station_map_widget.cpp
+    ui/station_map_widget.h
     user_demo_service.cpp
     user_demo_service.h
     user_main_window.cpp
@@ -40,3 +42,8 @@ if(TARGET Qt6::WebEngineWidgets)
 endif()
 
 ncs_set_project_warnings(ncs_user)
+
+qt_add_resources(ncs_user user_visual_assets
+    PREFIX "/ncs"
+    FILES resources/charging-scene.png
+)

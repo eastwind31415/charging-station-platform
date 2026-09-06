@@ -15,7 +15,9 @@
 #include <QToolButton>
 #include <QToolTip>
 #include <QUrl>
+#include <QUrlQuery>
 #include <QVBoxLayout>
+#include <QtMath>
 
 #ifdef NCS_HAS_WEBENGINE
 #include <QWebEngineView>
@@ -23,6 +25,27 @@
 
 namespace ncs::user
 {
+namespace
+{
+NavigationRoute browserFallbackRoute(const StationSummary& station, const QString& mode,
+                                     const QString& distance)
+{
+    const QString routeType = mode == QStringLiteral("walking")   ? QStringLiteral("walk")
+                              : mode == QStringLiteral("transit") ? QStringLiteral("bus")
+                                                                  : QStringLiteral("drive");
+    QUrl url(QStringLiteral("https://apis.map.qq.com/uri/v1/routeplan"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("type"), routeType);
+    query.addQueryItem(QStringLiteral("from"), QStringLiteral("当前位置"));
+    query.addQueryItem(QStringLiteral("to"),
+                       QStringLiteral("%1,%2,%3")
+                           .arg(QString::number(station.latitude, 'f', 6),
+                                QString::number(station.longitude, 'f', 6), station.name));
+    url.setQuery(query);
+    return {station.name, station.address, distance.isEmpty() ? station.distance : distance, mode,
+            url.toString()};
+}
+} // namespace
 
 QWidget* UserMainWindow::createNavigationPage()
 {
@@ -31,7 +54,7 @@ QWidget* UserMainWindow::createNavigationPage()
     layout->setContentsMargins(0, 8, 0, 0);
     layout->setSpacing(12);
     auto* title = new QLabel(QStringLiteral("路线导航"));
-    title->setStyleSheet(QStringLiteral("font-size:23px;color:#25324A;"));
+    title->setStyleSheet(QStringLiteral("font-size:23px;color:#243F30;"));
     auto* heading = new QHBoxLayout;
     heading->addWidget(title);
     auto* routeHelp = new QToolButton;
@@ -39,11 +62,11 @@ QWidget* UserMainWindow::createNavigationPage()
     routeHelp->setToolTip(
         QStringLiteral("路线会在系统浏览器中打开；地图服务暂不可用时仍可使用该方式继续导航。"));
     routeHelp->setStyleSheet(QStringLiteral(
-        "QToolButton{color:#0F766E;border:0;background:transparent;font-size:17px;padding:2px;}"));
+        "QToolButton{color:#23794E;border:0;background:transparent;font-size:17px;padding:2px;}"));
     heading->addWidget(routeHelp);
     heading->addStretch();
     layout->addLayout(heading);
-    layout->addWidget(new QLabel(QStringLiteral("起点：当前位置（模拟 GPS）")));
+    layout->addWidget(new QLabel(QStringLiteral("起点：当前位置")));
     navigationMode_ = new QComboBox;
     navigationMode_->addItem(QStringLiteral("驾车"), QStringLiteral("driving"));
     navigationMode_->addItem(QStringLiteral("步行"), QStringLiteral("walking"));
@@ -64,7 +87,7 @@ QWidget* UserMainWindow::createNavigationPage()
     layout->addWidget(navigationSummary_);
     navigationBrowserButton_ = button(QStringLiteral("地图不可用时在浏览器继续导航"));
     auto* back = button(QStringLiteral("返回电站详情"),
-                        QStringLiteral("QPushButton{background:#E2F3F0;color:#0F766E;border:0;"
+                        QStringLiteral("QPushButton{background:#E4F0DC;color:#23794E;border:0;"
                                        "border-radius:10px;font-size:15px;font-weight:600;}"));
     layout->addWidget(navigationBrowserButton_);
     layout->addWidget(back);
@@ -96,7 +119,19 @@ void UserMainWindow::showNavigation()
     bottomNavigation_->hide();
     const QString mode = navigationMode_->currentData().toString();
     const int requestId = ++navigationRequestId_;
-    navigationRoute_ = service_.route(selectedStationId_, mode);
+    if (userApi_)
+    {
+        const auto station = stationsById_.constFind(selectedStationId_);
+        if (station == stationsById_.cend())
+        {
+            notify(QStringLiteral("站点信息已更新，请重新选择"), true);
+            showHome();
+            return;
+        }
+        navigationRoute_ = browserFallbackRoute(*station, mode, selectedStationDistance_);
+    }
+    else
+        navigationRoute_ = service_.route(selectedStationId_, mode);
     navigationSummary_->setText(QStringLiteral("正在向腾讯地图请求路线…"));
     navigationBrowserButton_->setEnabled(!navigationRoute_.url.isEmpty());
 #ifdef NCS_HAS_WEBENGINE
@@ -110,7 +145,9 @@ void UserMainWindow::showNavigation()
     }
     const int stationId = selectedStationId_;
     userApi_->navigationRoute(
-        stationId, std::nullopt, std::nullopt, QStringLiteral("北京市海淀区中关村"), mode,
+        stationId, qRound64(stationsById_.value(stationId).latitude * 1000000),
+        qRound64(stationsById_.value(stationId).longitude * 1000000),
+        stationsById_.value(stationId).address, mode,
         [this, stationId, requestId](ApiReply reply)
         {
             if (requestId != navigationRequestId_ || stationId != selectedStationId_ ||
@@ -128,7 +165,18 @@ void UserMainWindow::showNavigation()
 void UserMainWindow::showNavigationFallback(const QString& reason)
 {
     const QString mode = navigationMode_->currentData().toString();
-    navigationRoute_ = service_.route(selectedStationId_, mode);
+    if (userApi_)
+    {
+        const auto station = stationsById_.constFind(selectedStationId_);
+        if (station == stationsById_.cend())
+        {
+            showHome();
+            return;
+        }
+        navigationRoute_ = browserFallbackRoute(*station, mode, selectedStationDistance_);
+    }
+    else
+        navigationRoute_ = service_.route(selectedStationId_, mode);
     const QString modeText = mode == QStringLiteral("walking")   ? QStringLiteral("步行")
                              : mode == QStringLiteral("transit") ? QStringLiteral("公交")
                                                                  : QStringLiteral("驾车");
@@ -210,7 +258,7 @@ try {
  const route=__ROUTE__;
  const points=route.map(p=>new TMap.LatLng(p.latitudeE6/1e6,p.longitudeE6/1e6));
  const map=new TMap.Map(document.getElementById('map'),{center:points[0],zoom:12});
- new TMap.MultiPolyline({map:map,styles:{route:new TMap.PolylineStyle({color:'#0F766E',width:7,borderWidth:2,borderColor:'#ffffff',lineCap:'round'})},geometries:[{id:'route',styleId:'route',paths:points}]});
+ new TMap.MultiPolyline({map:map,styles:{route:new TMap.PolylineStyle({color:'#23794E',width:7,borderWidth:2,borderColor:'#ffffff',lineCap:'round'})},geometries:[{id:'route',styleId:'route',paths:points}]});
  new TMap.MultiMarker({map:map,geometries:[{id:'origin',position:points[0]},{id:'destination',position:points[points.length-1]}]});
  const bounds=new TMap.LatLngBounds(); points.forEach(p=>bounds.extend(p)); map.fitBounds(bounds,{padding:48});
 } catch(e) { fail(); }
