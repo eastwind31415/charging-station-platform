@@ -93,7 +93,7 @@ StationListWidget::StationListWidget(const QVector<StationSummary>& stations, QW
                        "selection-background-color:#E7F5F1;selection-color:#0F766E;}"));
     auto* searchSymbol = new SearchGlyph;
     searchEdit_ = new QLineEdit;
-    searchEdit_->setPlaceholderText(QStringLiteral("搜索站点或地址"));
+    searchEdit_->setPlaceholderText(QStringLiteral("搜索地址"));
     searchEdit_->setClearButtonEnabled(true);
     searchEdit_->setStyleSheet(QStringLiteral(
         "QLineEdit{background:transparent;border:0;padding:8px 0;color:#25324A;font-size:14px;}"
@@ -132,6 +132,7 @@ StationListWidget::StationListWidget(const QVector<StationSummary>& stations, QW
 
 void StationListWidget::setStations(QVector<StationSummary> stations)
 {
+    setLoading(false);
     stations_ = std::move(stations);
     refresh();
 }
@@ -168,6 +169,7 @@ void StationListWidget::setLoading(bool loading)
 
 void StationListWidget::showError(const QString& userMessage)
 {
+    refreshButton_->setEnabled(true);
     clearCards();
     auto* error = new QLabel(userMessage.isEmpty() ? QStringLiteral("网络服务不可用，请稍后重试")
                                                    : userMessage);
@@ -194,6 +196,16 @@ void StationListWidget::requestRefresh()
     setLoading(true);
     const QPointF coordinate = locationCoordinate(locationBox_->currentText());
     // Per the REST contract, keyword is an address/location hint, not a local name filter.
+    emit loadRequested(qRound64(coordinate.y() * 1000000), qRound64(coordinate.x() * 1000000),
+                       searchEdit_->text().trimmed());
+}
+
+void StationListWidget::refreshAvailability()
+{
+    if (!remoteSource_ || !refreshButton_->isEnabled())
+        return;
+    refreshButton_->setEnabled(false);
+    const QPointF coordinate = locationCoordinate(locationBox_->currentText());
     emit loadRequested(qRound64(coordinate.y() * 1000000), qRound64(coordinate.x() * 1000000),
                        searchEdit_->text().trimmed());
 }

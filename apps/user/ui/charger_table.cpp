@@ -74,9 +74,9 @@ void ChargerTable::rebuild()
             selectedCode_.clear();
             rebuild();
         } : std::function<void()>{});
+        card->setObjectName(QStringLiteral("chargerCard"));
         card->setCursor(available ? Qt::PointingHandCursor : Qt::ArrowCursor);
-        card->setToolTip(selected ? QStringLiteral("已选择；双击卡片空白处或点击“取消选择”可取消")
-                                  : QString());
+        card->setToolTip(selected ? QStringLiteral("再次点击勾选按钮可取消选择") : QString());
         card->setStyleSheet(
             QStringLiteral("QFrame{background:%1;border:2px solid %2;border-radius:14px;}")
                 .arg(selected ? QStringLiteral("#DDF5EF") : QStringLiteral("#FFFFFF"),
@@ -92,6 +92,7 @@ void ChargerTable::rebuild()
         auto* layout = new QHBoxLayout(card);
         layout->setContentsMargins(14, 11, 14, 11);
         auto* text = new QVBoxLayout;
+        text->setSpacing(6);
         auto* code = new QLabel(charger.code);
         code->setStyleSheet(QStringLiteral("font-size:16px;font-weight:700;color:#25324A;"));
         auto* meta =
@@ -117,6 +118,8 @@ void ChargerTable::rebuild()
             available ? (selected ? QStringLiteral("取消选择") : QStringLiteral("选择"))
                       : charger.status);
         choose->setMinimumSize(66, 36);
+        choose->setAccessibleName(
+            (selected ? QStringLiteral("取消选择 ") : QStringLiteral("选择 ")) + charger.code);
         choose->setEnabled(available);
         choose->setStyleSheet(
             QStringLiteral(

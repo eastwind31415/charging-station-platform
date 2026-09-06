@@ -47,6 +47,7 @@ QWidget* UserMainWindow::createProfilePage()
     avatarRow->addStretch();
     nicknameEdit_ = new QLineEdit;
     nicknameEdit_->setMaxLength(20);
+    nicknameEdit_->setAccessibleName(QStringLiteral("昵称"));
     profileName_ = new QLabel;
     profileBalance_ = new QLabel;
     profileBalance_->setStyleSheet(QStringLiteral("font-size:24px;font-weight:700;color:#147A50;"));

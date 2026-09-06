@@ -49,7 +49,7 @@ QWidget* UserMainWindow::createOrdersPage()
     auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(0, 8, 0, 0);
     auto* title = new QLabel(QStringLiteral("我的订单"));
-    title->setStyleSheet(QStringLiteral("font-size:23px;color:#25324A;"));
+    title->setStyleSheet(QStringLiteral("font-size:22px;font-weight:700;color:#25324A;"));
     auto* heading = new QHBoxLayout;
     heading->addWidget(title);
     auto* help = new QToolButton;
@@ -59,6 +59,13 @@ QWidget* UserMainWindow::createOrdersPage()
         "QToolButton{color:#0F766E;border:0;background:transparent;font-size:17px;padding:2px;}"));
     heading->addWidget(help);
     heading->addStretch();
+    auto* refresh = new QPushButton(QStringLiteral("刷新"));
+    refresh->setCursor(Qt::PointingHandCursor);
+    refresh->setStyleSheet(
+        QStringLiteral("QPushButton{background:#E2F3F0;color:#0F766E;border:0;border-radius:9px;"
+                       "font-size:13px;font-weight:700;padding:7px 12px;}"
+                       "QPushButton:hover{background:#D2ECE5;}"));
+    heading->addWidget(refresh);
     layout->addLayout(heading);
     ordersScroll_ = new QScrollArea;
     ordersScroll_->setWidgetResizable(true);
@@ -74,6 +81,13 @@ QWidget* UserMainWindow::createOrdersPage()
     ordersEmpty_->setStyleSheet(
         QStringLiteral("padding:52px 18px;color:#52716C;font-size:15px;line-height:1.7;"));
     layout->addWidget(ordersEmpty_, 1);
+    ordersRetryButton_ = new QPushButton(QStringLiteral("重新加载"));
+    ordersRetryButton_->setObjectName(QStringLiteral("primaryButton"));
+    ordersRetryButton_->setMinimumHeight(42);
+    ordersRetryButton_->hide();
+    layout->addWidget(ordersRetryButton_);
+    connect(refresh, &QPushButton::clicked, this, &UserMainWindow::refreshOrders);
+    connect(ordersRetryButton_, &QPushButton::clicked, this, &UserMainWindow::refreshOrders);
     connect(help, &QToolButton::clicked, this,
             [help] {
                 QToolTip::showText(help->mapToGlobal(QPoint(0, help->height())), help->toolTip(),
@@ -94,16 +108,21 @@ void UserMainWindow::refreshOrders()
 {
     if (userApi_)
     {
+        const int requestId = ++ordersRequestId_;
         ordersScroll_->hide();
-        ordersEmpty_->setText(QStringLiteral("正在加载订单…"));
+        ordersEmpty_->setText(QStringLiteral("正在加载…"));
         ordersEmpty_->show();
+        ordersRetryButton_->hide();
         userApi_->orders(
             1, 50,
-            [this](ApiReply reply)
+            [this, requestId](ApiReply reply)
             {
+                if (requestId != ordersRequestId_)
+                    return;
                 if (!reply.ok())
                 {
-                    ordersEmpty_->setText(QStringLiteral("订单加载失败，请稍后重试"));
+                    ordersEmpty_->setText(QStringLiteral("加载失败"));
+                    ordersRetryButton_->show();
                     notify(reply.message, true);
                     return;
                 }
@@ -144,6 +163,9 @@ void UserMainWindow::renderOrders(const QVector<OrderSummary>& records)
 {
     ordersScroll_->setVisible(!records.isEmpty());
     ordersEmpty_->setVisible(records.isEmpty());
+    ordersRetryButton_->hide();
+    if (records.isEmpty())
+        ordersEmpty_->setText(QStringLiteral("⚡ 还没有充电足迹"));
     clearCards(ordersCards_);
     for (const OrderSummary& order : records)
     {

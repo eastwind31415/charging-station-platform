@@ -25,7 +25,7 @@ StationCard::StationCard(const StationSummary& station, QWidget* parent)
     setCursor(Qt::PointingHandCursor);
     auto* layout = new QVBoxLayout(this);
     layout->setContentsMargins(16, 14, 16, 13);
-    layout->setSpacing(8);
+    layout->setSpacing(10);
 
     auto* heading = new QHBoxLayout;
     auto* name = text(station.name, 16);
