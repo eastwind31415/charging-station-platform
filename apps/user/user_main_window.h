@@ -2,8 +2,8 @@
 
 #include "user_demo_service.h"
 
-#include <QMainWindow>
 #include <QHash>
+#include <QMainWindow>
 #include <QVector>
 
 class QLabel;
@@ -19,11 +19,26 @@ class QPauseAnimation;
 class QSequentialAnimationGroup;
 class QGraphicsOpacityEffect;
 class QJsonObject;
-namespace ncs::user { class ChargerTable; }
-namespace ncs::user { class ChargeSocGauge; }
-namespace ncs::user { class StationListWidget; }
-namespace ncs::user { class BottomNavigation; }
-namespace ncs::user { class UserApi; }
+namespace ncs::user
+{
+class ChargerTable;
+}
+namespace ncs::user
+{
+class ChargeSocGauge;
+}
+namespace ncs::user
+{
+class StationListWidget;
+}
+namespace ncs::user
+{
+class BottomNavigation;
+}
+namespace ncs::user
+{
+class UserApi;
+}
 namespace ncs::user
 {
 
