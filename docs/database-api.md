@@ -4,7 +4,7 @@
 | --- | --- |
 | 文档版本 | V1.0 |
 | 接口版本 | `/api/v1` |
-| 通信 | HTTPS REST + JSON；实时事件使用鉴权 WebSocket |
+| 通信 | 默认及正式环境使用 HTTPS REST + JSON；实时事件使用鉴权 WebSocket；仅 NFR-D-01 允许的本机开发模式可使用 HTTP/WS |
 | 数据实现 | Crow Service → SQLite，客户端不得直接访问数据库 |
 | 适用模块 | Qt 用户端、Qt 管理端、Web 大屏、ML 子进程 |
 | 关联需求 | `UC-U`、`UC-A`、`UC-D`、`UC-W`、`UC-M`、`BR-01`～`BR-12` |
@@ -21,6 +21,8 @@
 ```text
 https://127.0.0.1:8443/api/v1
 ```
+
+本机联调可由服务端和客户端同时显式设置 `NCS_ALLOW_INSECURE_HTTP=true`，此时地址为 `http://127.0.0.1:8443/api/v1`，事件地址相应为 `ws://127.0.0.1:8443/api/v1/events`。该例外仅允许 `development` 和数字回环地址；测试、验收、生产或非回环地址必须拒绝明文模式。客户端不得忽略 HTTPS 证书错误。
 
 | 路由前缀 | 调用方 | 权限 |
 | --- | --- | --- |
@@ -490,6 +492,41 @@ Idempotency-Key: <uuid>
 
 该接口仅供展示，不能作为结算价格承诺；活动流程报价以 §5.3 返回的 `quoteNo` 和快照为准。
 
+### 4.5 GET `/stations/{stationId}/route` — 腾讯地图路线规划
+
+需要用户会话。参数：`latitudeE6`、`longitudeE6`、`keyword`、`mode`。`mode` 必填且仅允许 `driving`、`walking`、`transit`；经纬度必须成对出现。客户端已有有效坐标时优先使用坐标，否则服务端尝试地理编码 `keyword`，最后才使用演示默认位置。
+
+服务端使用 `TENCENT_MAP_SERVER_KEY` 请求固定的腾讯地图 HTTPS 路线规划端点；Key 不得出现在响应、URL 日志或客户端配置中。腾讯调用在有界阻塞工作队列执行，超时、无 Key、配额或响应异常时返回成功的降级结果，而不阻断导航页面。
+
+响应 `data`：
+
+```json
+{
+  "stationId": 1,
+  "stationName": "NCS 中关村充电站",
+  "destinationAddress": "北京市海淀区中关村大街 27 号",
+  "mode": "driving",
+  "originLatitudeE6": 39977680,
+  "originLongitudeE6": 116316417,
+  "destinationLatitudeE6": 39983700,
+  "destinationLongitudeE6": 116315200,
+  "distanceMeter": 2300,
+  "durationSecond": 480,
+  "provider": "TENCENT_MAP",
+  "locationFallback": false,
+  "routeFallback": false,
+  "polyline": [
+    {"latitudeE6": 39977680, "longitudeE6": 116316417}
+  ],
+  "steps": [
+    {"instruction": "向东行驶", "distanceMeter": 300, "durationSecond": 60}
+  ],
+  "browserUrl": "https://apis.map.qq.com/uri/v1/routeplan?..."
+}
+```
+
+腾讯路线成功时 `provider=TENCENT_MAP`、`routeFallback=false`。腾讯能力不可用时返回 `provider=LOCAL_FALLBACK`、`routeFallback=true`、`durationSecond=0`，`polyline` 只含起终点并以 Haversine 计算 `distanceMeter`；`browserUrl` 仅作为最终用户操作入口。`locationFallback` 只表示起点定位是否退回默认坐标，与路线服务是否降级相互独立。
+
 ## 5. 充电流程接口（`/api/v1/user`）
 
 ### 5.1 POST `/flows` — 请求充电或入队
@@ -688,7 +725,7 @@ Idempotency-Key: <uuid>
 
 订单、钱包、欠费、钱包流水、设备释放、设备累计值、流程状态和通知 outbox 必须在同一事务完成。重复请求返回同一小票。
 
-## 6. 管理员认证与用户管理（`/api/v1/admin`）
+## 6. 管理员认证、账号与用户管理（`/api/v1/admin`）
 
 ### 6.1 POST `/auth/login` — 管理员登录
 
@@ -739,6 +776,72 @@ Idempotency-Key: <uuid>
 ### 6.7 GET `/users/{userId}/orders` — 用户订单历史
 
 参数与用户端订单列表相同。管理员访问必须写审计日志。
+
+管理员账号管理（SRS `UC-A-09`）使用统一 `AdminAccount` 响应体，只返回 `id`、`username`、`roles`、`status`、`mustChangePassword` 和 `version`，不返回密码、口令哈希或演示密钥：
+
+```json
+{
+  "id": 2,
+  "username": "ops_wang",
+  "roles": ["OPERATOR"],
+  "status": 1,
+  "mustChangePassword": true,
+  "version": 1
+}
+```
+
+账号名只接受 3～32 位字母、数字或下划线并全局唯一；口令只接受 10～128 位，服务端按 NFR-S-01 保存专用哈希。登录锁定沿用 SRS `UC-A-01`：账号或密码错误统一提示且不区分原因，任一账号连续失败 5 次锁定 30 秒，各账号独立计数。演示账号 `admin/123456` 的登录与开发种子行为不受影响。
+
+### 6.8 GET `/accounts` — 管理员账号列表
+
+需要 `OWNER` 权限。参数：`page`、`pageSize`。返回 `items`、`total`、`page`、`pageSize`；演示账号与真实账号一并列出，但本接口不区分演示来源，也不提供账号删除能力。
+
+### 6.9 POST `/accounts` — 创建管理员账号
+
+需要 `OWNER` 权限、重新验证和 `Idempotency-Key`。新建账号角色固定为运营管理员 `OPERATOR`（不授予 `OWNER`/`VIEWER`），状态正常、非演示账号、`mustChangePassword=true`。
+
+请求：
+
+```json
+{
+  "username": "ops_wang",
+  "password": "ncs-Initial-2026",
+  "reason": "新入职运营专员"
+}
+```
+
+- `username`：3～32 位，仅限字母、数字和下划线，全局唯一；
+- `password`：10～128 位，仅用于首次登录，服务端只保存专用哈希；
+- `reason`：2～200 个可见字符，写入审计原因。
+
+响应 HTTP 201 返回 `AdminAccount`。账号名重复返回 `ALREADY_EXISTS`；字段不合规返回 `VALIDATION_FAILED`；权限不足返回 `FORBIDDEN`；超过 15 分钟未重新验证返回 `REAUTH_REQUIRED`。审计动作 `ADMIN_CREATED`（targetType `ADMIN`，targetId 为新建账号 id）。
+
+### 6.10 PUT `/accounts/{adminId}/status` — 停用或启用管理员
+
+需要 `OWNER` 权限、重新验证和 `Idempotency-Key`。请求：
+
+```json
+{
+  "status": 0,
+  "reason": "该管理员离岗",
+  "version": 3
+}
+```
+
+`status`：0 停用、1 启用；`reason` 必填，2～200 个可见字符。停用立即撤销该账号全部会话并阻止登录；启用恢复登录且口令保持不变；OWNER 不得停用本人账号。账号不存在返回 `NOT_FOUND`；`version` 过期返回 `VERSION_CONFLICT`；停用自己或字段不合规返回 `VALIDATION_FAILED`。审计动作 `ADMIN_DISABLED` / `ADMIN_ENABLED`。
+
+### 6.11 PUT `/me/password` — 修改本人密码
+
+需要管理员（`OPERATOR`/`OWNER`）登录，无需 `Idempotency-Key`。请求：
+
+```json
+{
+  "currentPassword": "example-old-password",
+  "newPassword": "example-new-password-2026"
+}
+```
+
+`newPassword` 10～128 位。校验当前密码成功后更新口令、清除 `mustChangePassword` 并返回最新 `AdminAccount`；当前密码错误返回 `UNAUTHORIZED`。成功后当前会话保持，该管理员其他终端会话立即失效。审计动作 `ADMIN_PASSWORD_CHANGED`（targetType `ADMIN`）。
 
 ## 7. 管理员站点、设备与价格（`/api/v1/admin`）
 
@@ -1160,6 +1263,8 @@ Token 通过握手 `Authorization: Bearer <token>` 传递，不放入 URL。允�
 ```
 
 状态值：0 闲置、1 在用、2 故障、3 停用、4 重启中。
+
+投递时若设备记录已不可查（如随后被清理），事件会省略 `chargerCode` 与 `stationId` 字段；客户端不得假设这两个字段必然存在，设备以 `chargerId` 为准。
 
 **`order.settled`**（对应用户与全部管理员，不含完整小票）：
 
